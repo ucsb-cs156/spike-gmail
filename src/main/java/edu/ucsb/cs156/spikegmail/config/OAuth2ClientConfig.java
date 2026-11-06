@@ -1,5 +1,6 @@
 package edu.ucsb.cs156.spikegmail.config;
 
+import edu.ucsb.cs156.spikegmail.services.TokenSecurityService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcOperations;
@@ -22,14 +23,22 @@ public class OAuth2ClientConfig {
    * silently forget that the admin had authorized Gmail. The table is created by Liquibase (see
    * db/migration/changes/OAuth2AuthorizedClient.json).
    *
+   * <p>The tokens are encrypted (AES-GCM, key in TOKEN_ENCRYPTION_KEY) before they reach the
+   * database, and decrypted when they are read back.
+   *
    * @param jdbcOperations the Spring JdbcTemplate
    * @param clientRegistrationRepository the registrations from application.properties
-   * @return the JDBC-backed service
+   * @param tokenSecurityService encrypts and decrypts token values
+   * @return the encrypting, JDBC-backed service
    */
   @Bean
   public OAuth2AuthorizedClientService authorizedClientService(
-      JdbcOperations jdbcOperations, ClientRegistrationRepository clientRegistrationRepository) {
-    return new JdbcOAuth2AuthorizedClientService(jdbcOperations, clientRegistrationRepository);
+      JdbcOperations jdbcOperations,
+      ClientRegistrationRepository clientRegistrationRepository,
+      TokenSecurityService tokenSecurityService) {
+    return new EncryptingOAuth2AuthorizedClientService(
+        new JdbcOAuth2AuthorizedClientService(jdbcOperations, clientRegistrationRepository),
+        tokenSecurityService);
   }
 
   /**

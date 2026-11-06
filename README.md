@@ -20,12 +20,14 @@ Spring Security's `oauth2Login()` and `oauth2Client()` are used together, with t
 * **`google`** (login): scopes `email, profile`. Used by everyone.
 * **`gmail`** (authorization only): scopes `email, gmail.send`, redirect URI `/authorized/gmail`. Only an admin can start it; `GmailAuthorizationRequestResolver` refuses everybody else. It adds `access_type=offline` and `prompt=consent` so Google issues a **refresh token**.
 
-The resulting tokens are stored by `JdbcOAuth2AuthorizedClientService`, in the database, keyed by `gmail` + the admin's Google id. That is what lets *other* users trigger a send later: `GmailService` asks an `OAuth2AuthorizedClientManager` for the admin's token (refreshing it if it expired) and `POST`s to `gmail.googleapis.com/gmail/v1/users/me/messages/send`.
+The resulting tokens are stored by `JdbcOAuth2AuthorizedClientService`, in the database, **encrypted** with the key in `TOKEN_ENCRYPTION_KEY`, keyed by `gmail` + the admin's Google id. That is what lets *other* users trigger a send later: `GmailService` asks an `OAuth2AuthorizedClientManager` for the admin's token (refreshing it if it expired) and `POST`s to `gmail.googleapis.com/gmail/v1/users/me/messages/send`.
 
 | Class | Role |
 |---|---|
 | `config/SecurityConfig` | Login + the second OAuth client flow; `ROLE_ADMIN` from `ADMIN_EMAILS` |
 | `config/OAuth2ClientConfig` | JDBC token storage, token manager (with refresh), resolver bean |
+| `config/EncryptingOAuth2AuthorizedClientService` | Wraps the JDBC store so tokens are encrypted at rest (AES-GCM) |
+| `services/TokenSecurityService` | The encryption, same pattern as `proj-frontiers` |
 | `config/GmailAuthorizationRequestResolver` | Admin-only guard; adds the offline-access parameters |
 | `controllers/GmailAuthorizationController` | Landing point after consent; verifies the admin authorized *their own* account; records the sender |
 | `controllers/GmailSendController` | Sends the test email to the logged in user |
@@ -36,7 +38,7 @@ The resulting tokens are stored by `JdbcOAuth2AuthorizedClientService`, in the d
 **Before running, follow [docs/oauth.md](docs/oauth.md).** It covers creating the Google OAuth client, the two `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` values, and which scopes to configure in the Google Cloud Console (including the `gmail.send` scope and the Gmail API).
 
 ```
-cp .env.SAMPLE .env     # then edit .env
+cp .env.SAMPLE .env     # then edit .env (including TOKEN_ENCRYPTION_KEY: openssl rand -base64 32)
 mvn spring-boot:run
 ```
 

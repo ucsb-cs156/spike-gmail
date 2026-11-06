@@ -103,17 +103,19 @@ and edit it:
 ```
 GOOGLE_CLIENT_ID=1234567890-abcdefg.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxx
+TOKEN_ENCRYPTION_KEY=<output of: openssl rand -base64 32>
 ADMIN_EMAILS=phtcon@ucsb.edu
 ```
 
 * `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are the two values from step 5. There is only *one* of each; both the login registration and the Gmail registration use the same pair.
+* `TOKEN_ENCRYPTION_KEY` is the key used to encrypt the Google access and refresh tokens before they are stored in the database (see "Token encryption" below). Generate it with `openssl rand -base64 32`. **The app cannot log anyone in until it is set to a valid key**, because Spring stores a token for every login and refuses to store it unencrypted.
 * `ADMIN_EMAILS` is a comma-separated list of the Google accounts that are admins (**no spaces**). Only these users see the "Authorize ... Gmail" link, and only they can use `/oauth2/authorization/gmail`.
 * `.env` contains secrets and is in `.gitignore`. Never commit it.
 
 ## Step 6 (Dokku only): set the same values on the server
 
 ```
-dokku config:set --no-restart spike-gmail GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=... PRODUCTION=true
+dokku config:set --no-restart spike-gmail GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32) ADMIN_EMAILS=... PRODUCTION=true
 ```
 
 Also give the app a Postgres database (see <https://ucsb-cs156.github.io/topics/dokku/postgres_database.html>). The tokens are stored in the database, so a redeploy does not make the admin authorize again.
@@ -139,10 +141,29 @@ Also give the app a Postgres database (see <https://ucsb-cs156.github.io/topics/
 | "Google did not issue a refresh token" | The app always asks for one (`access_type=offline`, `prompt=consent`). If you see this, check that you did not remove those parameters in `GmailAuthorizationRequestResolver`. |
 | Sending worked, then fails with `invalid_grant` (a few days later) | The refresh token expired or was revoked. If the app is External and in Testing, it expires after 7 days: switch the app to **Internal** (Step 3). Otherwise the admin can click **Re-authorize**. They can also revoke access at <https://myaccount.google.com/permissions>. |
 | Sending fails with a 403 from `gmail.googleapis.com` | The Gmail API isn't enabled for the project (Step 2), or the admin authorized without `gmail.send` (Step 4). |
+| Login fails with "Token encryption key is not configured" (or "must be Base64 encoded" / "must decode to 16, 24, or 32 bytes") | `TOKEN_ENCRYPTION_KEY` is missing or malformed. Generate one with `openssl rand -base64 32`. |
+| Sending fails with "Failed to decrypt token" | `TOKEN_ENCRYPTION_KEY` changed after the admin authorized (or the database came from another deployment). The admin must click **Re-authorize**. |
 | Clicking the Gmail link as a non-admin gives a 404 | Working as intended. |
+
+## Token encryption
+
+The access token and refresh token Google issues are what allow this app to send mail as the admin, so they are **encrypted before they are written to the database**. The `oauth2_authorized_client` table only ever contains ciphertext.
+
+This follows the pattern used for Canvas and Slack tokens in [proj-frontiers](https://github.com/ucsb-cs156/proj-frontiers) (`CanvasApiTokenSecurityService`):
+
+* **AES-GCM** (`AES/GCM/NoPadding`), a random 96-bit IV per value, a 128-bit authentication tag (tampered ciphertext fails to decrypt).
+* Stored as `enc:v1:<base64(iv + ciphertext)>`.
+* The key is the Base64 value of `TOKEN_ENCRYPTION_KEY` (16, 24 or 32 bytes; 32 recommended), mapped to `app.token-encryption-key`. It is never in source control.
+* **Fails closed:** if the key is missing or malformed, saving a token throws and nothing is stored.
+* Values that do not start with `enc:v1:` are read as plaintext, for rows written before encryption existed.
+
+In code: `TokenSecurityService` does the encrypting, and `EncryptingOAuth2AuthorizedClientService` wraps Spring Security's `JdbcOAuth2AuthorizedClientService` so tokens are encrypted on save and decrypted on load. Nothing else in the app knows about it.
+
+Keep the **same key for the life of a database**. If it changes, tokens that were already stored can no longer be decrypted, and each admin has to click **Re-authorize**.
 
 ## Security notes for a spike
 
-* **Refresh tokens are stored in plaintext** in the `oauth2_authorized_client` table. Anyone who can read that table can send mail as the admin until the token is revoked. Before real use, encrypt them at rest (or at least restrict database access).
+* Anyone who has both the database **and** `TOKEN_ENCRYPTION_KEY` can read the tokens. Keep the key out of the database server's reach (a Dokku config var is a separate store from the Postgres service, but not a vault).
+* A refresh token stays valid until the admin revokes it at <https://myaccount.google.com/permissions> or it is replaced, so treat the key and the database as sensitive.
 * The "send test email" endpoint only ever sends to the logged-in user's own address, so it cannot be used to spam other people. There is no rate limit; add one before letting it send anything user-defined.
 * Google will rewrite the `From` header to the authorizing account anyway; the app sets it to the same address so the two agree.
