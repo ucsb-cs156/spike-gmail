@@ -36,14 +36,18 @@ Go to **Google Auth Platform** (or **APIs & Services → OAuth consent screen**)
 
 **Branding**: fill in the app name, the user support email, and the developer contact email.
 
-**Audience**: choose the user type. This choice matters a lot for the Gmail scope:
+**Audience**: choose **Internal**. **Any application that uses the `gmail.send` API should use the Internal user type.**
 
-* **Internal** (only available if your Google account belongs to a Google Workspace organization that permits it): only accounts in your organization can log in, and no Google verification is needed, even for sensitive scopes. If it is available to you, this is by far the easiest option for an app that is only used by people in one organization.
-* **External**: anyone with a Google account can attempt to log in. While the app's publishing status is **Testing**:
-  * only accounts you list under **Test users** can log in (up to 100), so **add the admin(s) and any people who will try the app**;
-  * the consent screen warns that "Google hasn't verified this app", and the user has to click through it;
-  * **refresh tokens expire after 7 days** whenever any scope other than the basic profile ones is requested. For this app that means *an admin has to click "Re-authorize" about once a week*. This is the most common reason a Gmail spike "works for a week and then stops".
-  * Moving an External app to **In production** removes those limits, but because `gmail.send` is a *sensitive scope*, Google then requires an app verification review.
+* **Internal** means only accounts in your Google Workspace organization (for UCSB, the `ucsb.edu` accounts) can log in. In exchange:
+  * no Google app verification is needed, even for sensitive scopes like `gmail.send`;
+  * there is no "Test users" list to maintain;
+  * there is no "Google hasn't verified this app" warning;
+  * **refresh tokens do not expire after 7 days**, so the admin authorizes once and the app keeps sending mail.
+* **Why not External?** An External app has to choose between two bad options for an app that sends Gmail:
+  * **Testing** status: only listed test users can log in (up to 100), users see an "unverified app" warning, and **refresh tokens expire after 7 days** for any app requesting non-basic scopes. An admin would have to click "Re-authorize" about once a week, and the app silently stops sending mail when they forget.
+  * **In production** status: because `gmail.send` is a *sensitive scope*, Google requires an app verification review before the restrictions go away.
+* **The consequence of Internal:** every user, admins included, must log in with an account in your organization. A personal `@gmail.com` account will be rejected by Google. That's the intended behavior for these course apps.
+* **If Internal is greyed out or missing:** the Google Cloud project is not inside your Workspace organization. Create the project under your organization (for UCSB, while signed in with your `ucsb.edu` account, check that the project's organization is shown as UCSB), or ask your Workspace admin. The user type can also be changed later under **Audience**, but it is simplest to choose Internal from the start.
 
 ## Step 4: Configure the scopes (Data Access)
 
@@ -128,11 +132,12 @@ Also give the app a Postgres database (see <https://ucsb-cs156.github.io/topics/
 |---|---|
 | `Error 400: redirect_uri_mismatch` | The redirect URI in Step 5 isn't listed exactly. Read the URI in the error page; it is the one the app sent. A login failure points at `/login/oauth2/code/google`, an authorization failure at `/authorized/gmail`. On Dokku, also make sure the app is using `https` (see `server.forward-headers-strategy` in `application.properties`). |
 | `Error 401: invalid_client` | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` not set (the defaults are `client_id_unset` / `client_secret_unset`). |
-| `Error 403: access_denied` or "app not verified / has not completed the verification process" | The app is **External** and in **Testing**, and the account isn't listed under **Test users** (Step 3). |
-| "Google hasn't verified this app" warning | Expected for External apps in Testing. Click **Advanced → Go to ... (unsafe)**. |
+| `Error 403: org_internal` | The app is **Internal** and the account used to log in is not in your Workspace organization (for example a personal `@gmail.com` account). Log in with an organization account. |
+| `Error 403: access_denied` or "app not verified / has not completed the verification process" | The app's user type is **External**. Switch it to **Internal** (Step 3). If it must stay External, the account must be listed under **Test users**. |
+| "Google hasn't verified this app" warning | Only appears for External apps. Switch to **Internal** (Step 3). |
 | Admin approves Gmail but the page says "authorized a different Google account" | On Google's account chooser the admin picked an account other than the one they're logged in with. Try again and choose the same account. |
 | "Google did not issue a refresh token" | The app always asks for one (`access_type=offline`, `prompt=consent`). If you see this, check that you did not remove those parameters in `GmailAuthorizationRequestResolver`. |
-| Sending worked, then fails with `invalid_grant` (a few days later) | The refresh token expired or was revoked. For an External app in Testing it expires after 7 days (Step 3). The admin can click **Re-authorize**. They can also revoke access at <https://myaccount.google.com/permissions>. |
+| Sending worked, then fails with `invalid_grant` (a few days later) | The refresh token expired or was revoked. If the app is External and in Testing, it expires after 7 days: switch the app to **Internal** (Step 3). Otherwise the admin can click **Re-authorize**. They can also revoke access at <https://myaccount.google.com/permissions>. |
 | Sending fails with a 403 from `gmail.googleapis.com` | The Gmail API isn't enabled for the project (Step 2), or the admin authorized without `gmail.send` (Step 4). |
 | Clicking the Gmail link as a non-admin gives a 404 | Working as intended. |
 
