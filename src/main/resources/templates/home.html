@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>spike-gmail</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    .flash { padding: .6rem .9rem; border-radius: .4rem; margin: 1rem 0; }
+    .ok { background: #e6f4ea; border: 1px solid #1e8e3e; }
+    .err { background: #fce8e6; border: 1px solid #d93025; }
+    section { margin-top: 2rem; }
+    form { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>spike-gmail</h1>
+
+  <div class="flash ok" th:if="${message}" th:text="${message}" data-testid="message"></div>
+  <div class="flash err" th:if="${error}" th:text="${error}" data-testid="error"></div>
+  <div class="flash err" th:if="${param.error}" data-testid="login-error">Login failed. Please try again.</div>
+
+  <!-- (a) Not logged in: only a Google login link -->
+  <div th:unless="${loggedIn}">
+    <p>You are not logged in.</p>
+    <p><a href="/oauth2/authorization/google" data-testid="login-link">Log in with Google</a></p>
+  </div>
+
+  <div th:if="${loggedIn}">
+    <div>
+      Logged in as <strong th:text="${email}">user@example.org</strong>
+      (<span th:text="${admin} ? 'admin' : 'regular user'">regular user</span>)
+      <form th:action="@{/logout}" method="post"><button type="submit">Log out</button></form>
+    </div>
+
+    <!-- (c) Admins only: authorize sending Gmail on their behalf -->
+    <section th:if="${admin}">
+      <h2>Admin</h2>
+      <p th:if="${myAuthorization}">
+        You have authorized this app to send email as you.
+        <a href="/oauth2/authorization/gmail" data-testid="gmail-reauthorize-link">Re-authorize</a>
+      </p>
+      <p th:unless="${myAuthorization}">
+        Emails sent by this app have to come from a real Google account.
+        <a href="/oauth2/authorization/gmail" data-testid="gmail-authorize-link">Authorize this app to send Gmail on my behalf</a>
+      </p>
+    </section>
+
+    <!-- (d) Everyone: one button per admin who has authorized sending -->
+    <section>
+      <h2>Send yourself a test email</h2>
+      <p th:if="${senders.isEmpty()}" data-testid="no-senders">
+        No admin has authorized sending email yet.
+      </p>
+      <ul th:unless="${senders.isEmpty()}">
+        <li th:each="sender : ${senders}">
+          <form th:action="@{/gmail/send/{id}(id=${sender.id})}" method="post">
+            <button type="submit">
+              Send me an email from <span th:text="${sender.email}">admin@ucsb.edu</span>
+            </button>
+          </form>
+        </li>
+      </ul>
+      <p><small>The email is always sent to the address you are logged in with.</small></p>
+    </section>
+  </div>
+</body>
+</html>

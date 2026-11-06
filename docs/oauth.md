@@ -1,0 +1,143 @@
+# Google OAuth setup for spike-gmail
+
+This app uses **one Google OAuth client** (one `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` pair) for **two different purposes**:
+
+| | Registration id | Who uses it | Scopes requested | Redirect URI |
+|---|---|---|---|---|
+| **Login** | `google` | Everyone | `email`, `profile` | `{baseUrl}/login/oauth2/code/google` |
+| **Send Gmail** | `gmail` | Only an admin who clicks "Authorize this app to send Gmail on my behalf" | `email`, `https://www.googleapis.com/auth/gmail.send` | `{baseUrl}/authorized/gmail` |
+
+Both registrations are in `src/main/resources/application.properties` and read the same two environment variables.
+
+Regular users are never shown the Gmail permission: it is requested in a separate OAuth round trip that only admins can start. That round trip does not log anybody in; it just stores a Gmail access token and refresh token for the admin that started it.
+
+Setting this up on localhost takes steps 1–5 below. Getting it to work on Dokku also needs step 6.
+
+> The Google Cloud Console is redesigned from time to time. The names below ("Google Auth Platform", "Branding", "Audience", "Data Access", "Clients") are what it was called when this was written; if a menu has moved, look for the same words.
+
+## Step 1: Create (or choose) a Google Cloud project
+
+At <https://console.cloud.google.com/>, create a project (or reuse your course project). If this is your first time, the course guides cover steps 1 and 2:
+
+* Create a project: <https://ucsb-cs156.github.io/topics/oauth/google_create_developer_project.html>
+* Consent screen: <https://ucsb-cs156.github.io/topics/oauth/google_oauth_consent_screen.html>
+
+## Step 2: Enable the Gmail API
+
+The scope alone is not enough; the project must also have the API turned on.
+
+1. **APIs & Services → Library**
+2. Search for **Gmail API**
+3. Click **Enable**
+
+## Step 3: Configure the consent screen (Google Auth Platform)
+
+Go to **Google Auth Platform** (or **APIs & Services → OAuth consent screen**).
+
+**Branding**: fill in the app name, the user support email, and the developer contact email.
+
+**Audience**: choose the user type. This choice matters a lot for the Gmail scope:
+
+* **Internal** (only available if your Google account belongs to a Google Workspace organization that permits it): only accounts in your organization can log in, and no Google verification is needed, even for sensitive scopes. If it is available to you, this is by far the easiest option for an app that is only used by people in one organization.
+* **External**: anyone with a Google account can attempt to log in. While the app's publishing status is **Testing**:
+  * only accounts you list under **Test users** can log in (up to 100), so **add the admin(s) and any people who will try the app**;
+  * the consent screen warns that "Google hasn't verified this app", and the user has to click through it;
+  * **refresh tokens expire after 7 days** whenever any scope other than the basic profile ones is requested. For this app that means *an admin has to click "Re-authorize" about once a week*. This is the most common reason a Gmail spike "works for a week and then stops".
+  * Moving an External app to **In production** removes those limits, but because `gmail.send` is a *sensitive scope*, Google then requires an app verification review.
+
+## Step 4: Configure the scopes (Data Access)
+
+Go to **Google Auth Platform → Data Access** (or, in the older UI, the *Scopes* step of the consent screen) and click **Add or remove scopes**. Add all of these:
+
+| Scope | Why |
+|---|---|
+| `openid` | Standard sign-in scope |
+| `.../auth/userinfo.email` (shown as "See your primary Google Account email address") | Login, and to verify which account an admin authorized |
+| `.../auth/userinfo.profile` (shown as "See your personal info...") | Login |
+| `https://www.googleapis.com/auth/gmail.send` (shown as "Send email on your behalf") | **Only** requested by the `gmail` registration. Needed to send mail. |
+
+If `gmail.send` doesn't appear in the list, either the Gmail API isn't enabled yet (Step 2) or you can paste it into the **Manually add scopes** box at the bottom of the dialog. Then click **Update** and **Save**.
+
+Notes:
+
+* `gmail.send` is the narrowest Gmail scope that can send mail: it **cannot read** the admin's mailbox.
+* Adding a scope to the consent screen only declares what the app is *allowed* to ask for. Whether a particular login asks for it is controlled by the `scope` lines in `application.properties`. That is why regular users, who log in through the `google` registration, never see the Gmail permission.
+
+## Step 5: Create the OAuth client and set the environment variables
+
+1. Go to **Google Auth Platform → Clients** (or **APIs & Services → Credentials → Create credentials → OAuth client ID**).
+2. **Application type:** *Web application*.
+3. **Name:** anything, e.g. `spike-gmail`.
+4. **Authorized JavaScript origins:** leave empty (this app does not use Google's browser libraries).
+5. **Authorized redirect URIs:** add **both** of these for every place the app runs.
+
+   For localhost:
+
+   ```
+   http://localhost:8080/login/oauth2/code/google
+   http://localhost:8080/authorized/gmail
+   ```
+
+   For a Dokku deployment (use your real hostname):
+
+   ```
+   https://spike-gmail.dokku-00.cs.ucsb.edu/login/oauth2/code/google
+   https://spike-gmail.dokku-00.cs.ucsb.edu/authorized/gmail
+   ```
+
+   The first URI is used by login; the second by the Gmail authorization. Google compares them character for character, so no trailing slashes, and `http` vs `https` matters.
+6. Click **Create**. Copy the **Client ID** and **Client secret**. (The secret can be viewed again later on the client's page.)
+
+Now create your `.env` file:
+
+```
+cp .env.SAMPLE .env
+```
+
+and edit it:
+
+```
+GOOGLE_CLIENT_ID=1234567890-abcdefg.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxx
+ADMIN_EMAILS=phtcon@ucsb.edu
+```
+
+* `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are the two values from step 5. There is only *one* of each; both the login registration and the Gmail registration use the same pair.
+* `ADMIN_EMAILS` is a comma-separated list of the Google accounts that are admins (**no spaces**). Only these users see the "Authorize ... Gmail" link, and only they can use `/oauth2/authorization/gmail`.
+* `.env` contains secrets and is in `.gitignore`. Never commit it.
+
+## Step 6 (Dokku only): set the same values on the server
+
+```
+dokku config:set --no-restart spike-gmail GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=... PRODUCTION=true
+```
+
+Also give the app a Postgres database (see <https://ucsb-cs156.github.io/topics/dokku/postgres_database.html>). The tokens are stored in the database, so a redeploy does not make the admin authorize again.
+
+## Using the app
+
+1. Start it with `mvn spring-boot:run` and open <http://localhost:8080>.
+2. Log in with Google. You'll see only the basic "email and profile" permissions.
+3. As an admin, click **Authorize this app to send Gmail on my behalf**. This is when Google shows the "Send email on your behalf" permission.
+4. After you approve, you're returned to the home page, which now lists you as a sender.
+5. Any logged in user can then click **Send me an email from *admin@...***, which sends a test message to *their own* address, from that admin's Gmail account.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| `Error 400: redirect_uri_mismatch` | The redirect URI in Step 5 isn't listed exactly. Read the URI in the error page; it is the one the app sent. A login failure points at `/login/oauth2/code/google`, an authorization failure at `/authorized/gmail`. On Dokku, also make sure the app is using `https` (see `server.forward-headers-strategy` in `application.properties`). |
+| `Error 401: invalid_client` | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` not set (the defaults are `client_id_unset` / `client_secret_unset`). |
+| `Error 403: access_denied` or "app not verified / has not completed the verification process" | The app is **External** and in **Testing**, and the account isn't listed under **Test users** (Step 3). |
+| "Google hasn't verified this app" warning | Expected for External apps in Testing. Click **Advanced → Go to ... (unsafe)**. |
+| Admin approves Gmail but the page says "authorized a different Google account" | On Google's account chooser the admin picked an account other than the one they're logged in with. Try again and choose the same account. |
+| "Google did not issue a refresh token" | The app always asks for one (`access_type=offline`, `prompt=consent`). If you see this, check that you did not remove those parameters in `GmailAuthorizationRequestResolver`. |
+| Sending worked, then fails with `invalid_grant` (a few days later) | The refresh token expired or was revoked. For an External app in Testing it expires after 7 days (Step 3). The admin can click **Re-authorize**. They can also revoke access at <https://myaccount.google.com/permissions>. |
+| Sending fails with a 403 from `gmail.googleapis.com` | The Gmail API isn't enabled for the project (Step 2), or the admin authorized without `gmail.send` (Step 4). |
+| Clicking the Gmail link as a non-admin gives a 404 | Working as intended. |
+
+## Security notes for a spike
+
+* **Refresh tokens are stored in plaintext** in the `oauth2_authorized_client` table. Anyone who can read that table can send mail as the admin until the token is revoked. Before real use, encrypt them at rest (or at least restrict database access).
+* The "send test email" endpoint only ever sends to the logged-in user's own address, so it cannot be used to spam other people. There is no rate limit; add one before letting it send anything user-defined.
+* Google will rewrite the `From` header to the authorizing account anyway; the app sets it to the same address so the two agree.

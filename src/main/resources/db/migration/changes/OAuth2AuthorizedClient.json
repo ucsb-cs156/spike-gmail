@@ -1,0 +1,32 @@
+{ "databaseChangeLog": [
+    {
+      "changeSet": {
+        "id": "OAuth2AuthorizedClient-h2",
+        "author": "spike-gmail",
+        "dbms": "h2",
+        "comment": "Schema required by Spring Security's JdbcOAuth2AuthorizedClientService (oauth2-client-schema.sql). This is where the admin's Gmail access and refresh tokens are stored.",
+        "changes": [
+          {
+            "sql": {
+              "sql": "CREATE TABLE IF NOT EXISTS oauth2_authorized_client (client_registration_id varchar(100) NOT NULL, principal_name varchar(200) NOT NULL, access_token_type varchar(100) NOT NULL, access_token_value blob NOT NULL, access_token_issued_at timestamp NOT NULL, access_token_expires_at timestamp NOT NULL, access_token_scopes varchar(1000) DEFAULT NULL, refresh_token_value blob DEFAULT NULL, refresh_token_issued_at timestamp DEFAULT NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL, PRIMARY KEY (client_registration_id, principal_name))"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "changeSet": {
+        "id": "OAuth2AuthorizedClient-postgresql",
+        "author": "spike-gmail",
+        "dbms": "postgresql",
+        "comment": "Same schema as the H2 changeSet, but PostgreSQL has no blob column type; bytea is what Spring Security's documentation recommends.",
+        "changes": [
+          {
+            "sql": {
+              "sql": "CREATE TABLE IF NOT EXISTS oauth2_authorized_client (client_registration_id varchar(100) NOT NULL, principal_name varchar(200) NOT NULL, access_token_type varchar(100) NOT NULL, access_token_value bytea NOT NULL, access_token_issued_at timestamp NOT NULL, access_token_expires_at timestamp NOT NULL, access_token_scopes varchar(1000) DEFAULT NULL, refresh_token_value bytea DEFAULT NULL, refresh_token_issued_at timestamp DEFAULT NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL, PRIMARY KEY (client_registration_id, principal_name))"
+            }
+          }
+        ]
+      }
+    }
+  ]}

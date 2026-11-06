@@ -1,0 +1,21 @@
+# Maven
+/target
+
+# IDEs
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+.idea
+*.iws
+*.iml
+*.ipr
+.vscode/
+*~
+
+# Local configuration (secrets!) -- never commit .env
+.env
+.DS_Store
